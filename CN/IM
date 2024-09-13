@@ -1,0 +1,126 @@
+ITERATIVE MEDIATOR
+---------------------------------------------------------------
+#include<unistd.h>                                                                                                                          
+
+#include <stdio.h>                                                                                                                          
+
+#include <string.h>                                                                                                                         
+
+#include <stdlib.h>                                                                                                                         
+
+#include <arpa/inet.h>                                                                                                                      
+
+#include <sys/socket.h>                                                                                                                     
+
+#define MEDIATOR_PORT 5656                                                                                                                  
+
+#define HOST_PORT 4567                                                                                                                      
+
+#define BUFFER_SIZE 1024                                                                                                                    
+
+char* resolve_ip(char *domain) {                                                                                                            
+
+        if (strcmp(domain, "example.com") == 0) return "93.184.216.34";                                                                     
+
+        if (strcmp(domain, "google.com") == 0) return "142.250.196.142";                                                                    
+        return NULL;                                                                                                                        
+
+}                                                                                                                                           
+
+int main() {                                                                                                                                
+
+        int sock;                                                                                                                           
+
+        struct sockaddr_in mediator_addr, client_addr, host_addr;                                                                           
+
+        char buffer[BUFFER_SIZE], *ip;                                                                                                      
+
+        socklen_t len = sizeof(client_addr);                                                                                                
+
+        if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {                                                                                  
+
+                perror("Socket creation failed");                                                                                           
+
+                exit(EXIT_FAILURE);                                                                                                         
+
+        }                                                                                                                                   
+
+        memset(&mediator_addr, 0, sizeof(mediator_addr));                                                                                   
+
+        mediator_addr.sin_family = AF_INET;                                                                                                 
+
+        mediator_addr.sin_port = htons(MEDIATOR_PORT);                                                                                      
+
+        mediator_addr.sin_addr.s_addr = INADDR_ANY;                                                                                         
+
+        if (bind(sock, (const struct sockaddr *) &mediator_addr, sizeof(mediator_addr)) < 0) {                                              
+
+                perror("Bind failed");                                                                                                      
+
+                close(sock);                                                                                                                
+
+                exit(EXIT_FAILURE);                                                                                                         
+
+        }                                                                                                                                   
+
+        while (1) {                                                                                                                         
+
+                memset(buffer, 0, BUFFER_SIZE);                                                                                             
+
+                recvfrom(sock, buffer, BUFFER_SIZE, 0, (struct sockaddr *) &client_addr, &len);                                             
+
+                buffer[strlen(buffer)] = '\0';                                                                                              
+
+                printf("Request for domain: %s\n", buffer);                                                                                 
+
+                ip = resolve_ip(buffer);                                                                                                    
+
+                if (ip != NULL) {                                                                                                           
+
+                        sendto(sock, ip, strlen(ip), 0, (struct sockaddr *) &client_addr, len);                                             
+
+                        printf("IP %s sent to client.\n", ip);                                                                              
+
+                } else {                                                                                                                    
+
+                        int host_sock;                                                                                                      
+
+                        if ((host_sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {                                                             
+
+                                perror("Host socket creation failed");                                                                      
+
+                                close(sock);                                                                                                
+
+                                exit(EXIT_FAILURE);                                                                                         
+
+                        }                                                                                                                   
+
+                        memset(&host_addr, 0, sizeof(host_addr));                                                                           
+
+                        host_addr.sin_family = AF_INET;                                                                                     
+
+                        host_addr.sin_port = htons(HOST_PORT);                                                                              
+
+                        host_addr.sin_addr.s_addr = INADDR_ANY;                                                                             
+
+                        sendto(host_sock, buffer, strlen(buffer), 0, (const struct sockaddr *) &host_addr, sizeof(host_addr));              
+
+                        int n = recvfrom(host_sock, buffer, BUFFER_SIZE, 0, NULL, NULL);                                                    
+
+                        buffer[n] = '\0';                                                                                                   
+
+                        sendto(sock, buffer, strlen(buffer), 0, (struct sockaddr *) &client_addr, len);                                     
+
+                        printf("IP %s received from host and sent to client.\n", buffer);                                                   
+
+                        close(host_sock);                                                                                                   
+
+                }                                                                                                                           
+
+        }                                                                                                                                   
+
+        close(sock);                                                                                                                        
+
+        return 0;                                                                                                                           
+
+}
