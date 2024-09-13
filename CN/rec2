@@ -1,0 +1,134 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+
+#define PORT 8080
+#define WEB_SERVER_PORT 9090
+#define CACHE_SIZE 1024
+
+// Simple cache structure
+struct Cache {
+    char url[256];
+    char content[1024];
+};
+
+struct Cache cache[CACHE_SIZE];
+int cache_count = 0;
+
+// Function to check if the content is cached
+int check_cache(const char *url, char *content) {
+    for (int i = 0; i < cache_count; i++) {
+        if (strcmp(cache[i].url, url) == 0) {
+            strcpy(content, cache[i].content);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Function to add content to the cache
+void add_to_cache(const char *url, const char *content) {
+    if (cache_count < CACHE_SIZE) {
+        strcpy(cache[cache_count].url, url);
+        strcpy(cache[cache_count].content, content);
+        cache_count++;
+    }
+}
+
+// Function to forward request to the actual web server
+void forward_to_web_server(const char *request, char *response) {
+    int sockfd;
+    struct sockaddr_in web_server_addr;
+    char buffer[1024] = {0};
+
+    // Create socket
+    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Web server address
+    web_server_addr.sin_family = AF_INET;
+    web_server_addr.sin_port = htons(WEB_SERVER_PORT);
+    inet_pton(AF_INET, "127.0.0.1", &web_server_addr.sin_addr);
+
+    // Connect to web server
+    if (connect(sockfd, (struct sockaddr*)&web_server_addr, sizeof(web_server_addr)) < 0) {
+        perror("Connection to web server failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Send request to web server
+    send(sockfd, request, strlen(request), 0);
+
+    // Receive response from web server
+    int valread = read(sockfd, buffer, sizeof(buffer));
+    buffer[valread] = '\0';
+    strcpy(response, buffer);
+
+    close(sockfd);
+}
+
+int main() {
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    char buffer[1024] = {0};
+    char response[1024] = {0};
+
+    // Create socket for cache server
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("Socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    address.sin_family = AF_INET;
+    address.sin_port = htons(PORT);
+    address.sin_addr.s_addr = INADDR_ANY;
+
+    // Bind socket
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        perror("Bind failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Listen for client requests
+    if (listen(server_fd, 5) < 0) {
+        perror("Listen failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Cache server is running...\n");
+
+    while (1) {
+        if ((new_socket = accept(server_fd, NULL, NULL)) < 0) {
+            perror("Accept failed");
+            exit(EXIT_FAILURE);
+        }
+
+        // Receive client request
+        read(new_socket, buffer, sizeof(buffer));
+        printf("Received request: %s\n", buffer);
+
+        // Check if the content is cached
+        if (check_cache(buffer, response)) {
+            printf("Cache hit: Sending cached response.\n");
+        } else {
+            printf("Cache miss: Forwarding request to web server.\n");
+
+            // Forward request to web server and get the response
+            forward_to_web_server(buffer, response);
+
+            // Cache the response
+            add_to_cache(buffer, response);
+        }
+
+        // Send response back to client
+        send(new_socket, response, strlen(response), 0);
+
+        close(new_socket);
+    }
+
+    return 0;
+}
